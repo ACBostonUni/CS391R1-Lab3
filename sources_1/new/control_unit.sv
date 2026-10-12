@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
+// Company: Austin Corp
+// Engineer: Austin
 // 
 // Create Date: 09/29/2026 05:58:08 PM
 // Design Name: 
