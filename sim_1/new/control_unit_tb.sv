@@ -22,13 +22,21 @@
 
 module control_unit_tb();
 
-
+    // Control unit
     logic clk;
     logic rst;
     logic[31:0] instruction;
     logic valid;
     logic ready;
     logic error;
+    
+    // AXI4-Lite Read Signals
+    logic [19:0] araddr; // 19 because we have memory depth of 262,144
+    logic        arvalid; // address valid by CPU
+    logic        arready; // address ready ack by BRAM
+    logic [31:0] rdata; // The instruction being loaded
+    logic        rvalid; // instr valid  by BRAM
+    logic        rready; // Wait for master to ack
     
     control_unit myCUnit 
     (.clk(clk),
@@ -37,12 +45,54 @@ module control_unit_tb();
      .valid(valid),
      .ready(ready),
      .error(error));
+     
+     
+     
+     
+    // Instantiate the BRAM 
+    MY_AXI_BRAM my_bram (
+    .s_axi_aclk    (clk),
+    .s_axi_aresetn (!rst),// Negate because Active-low reset for BRAM
+    
+    // Read Address Channel
+    .s_axi_araddr  (araddr), 
+    .s_axi_arprot  (3'b000), // set to 0 we don't need this for our purposes
+    .s_axi_arvalid (arvalid),
+    .s_axi_arready (arready),
+    
+    // Read Data Channel
+    .s_axi_rdata   (rdata),
+    .s_axi_rresp   (),// Leave unconnected No err handling needed rn for my local BRAM 
+    .s_axi_rvalid  (rvalid),
+    .s_axi_rready  (rready),
+    
+    // set all write channels to 0 because we are using for instruction memory purposes
+    .s_axi_awaddr  (20'b0),
+    .s_axi_awprot  (3'b0),
+    .s_axi_awvalid (1'b0),
+    .s_axi_awready (),
+    .s_axi_wdata   (32'b0),
+    .s_axi_wstrb   (4'b0),
+    .s_axi_wvalid  (1'b0),
+    .s_axi_wready  (),
+    .s_axi_bresp   (),
+    .s_axi_bvalid  (1'b0),
+    .s_axi_bready  (1'b1)
+);
+     
+    
+    
+   // 
+    assign instruction = rdata;
+    // Connect BRAM rvalid directly to control unit valid (since data is valid when BRAM says so)
+    assign valid = rvalid;
+     
     
     always #5ns clk = ~clk;
     
     initial begin
     clk = 0;
-    rst=1; valid = 0; instruction = 0;
+    rst=1; instruction = 0;
     #20; // set reset up for 20ns
     rst = 0;
     #10; // Now set it to off
