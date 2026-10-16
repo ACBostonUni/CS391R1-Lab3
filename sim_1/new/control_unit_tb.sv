@@ -1,288 +1,162 @@
 `timescale 1ns / 1ps
-//////////////////////////////////////////////////////////////////////////////////
-// Company: 
-// Engineer: 
-// 
-// Create Date: 10/11/2026 12:23:32 PM
-// Design Name: 
-// Module Name: control_unit_tb
-// Project Name: 
-// Target Devices: 
-// Tool Versions: 
-// Description: 
-// 
-// Dependencies: 
-// 
-// Revision:
-// Revision 0.01 - File Created
-// Additional Comments:
-// 
-//////////////////////////////////////////////////////////////////////////////////
 
+module control_unit_tb;
 
-module control_unit_tb();
+    bit clk = 1'b0;
+    bit cpu_rst = 1'b1;
+    bit bram_rst = 1'b1;
 
-    // Control unit
-    logic clk;
-    logic rst;
-    logic[31:0] instruction;
-    logic valid;
-    logic ready;
-    logic error;
+    // BRAM write signals used to load the program.
+    wire        awready; 
+    logic       awvalid;
+    logic [19:0] awaddr;
+    wire        wready;
+    logic       wvalid;
+    logic [31:0] wdata;
+    logic       bready;
+    wire        bvalid;
+    wire [1:0]  bresp;
+
+    // Read Channels
+    wire        arready; // BRAM raises this when it can accept the CPU's read-address request.
+    wire [19:0] araddr; // Address of the instruction the CPU wants to fetch from BRAM.
+    wire        arvalid; // CPU raises this to indicate that araddr contains a valid read request.
+    wire        rready;  // CPU raises this when it is ready to accept the instruction data.
+    wire        rvalid;
+    wire [31:0] rdata;
+
+    localparam int memBytes = 512; // Reserve 512 bytes for the memory image
+    localparam logic [31:0] programEndPC = 32'h0000_0160; // PC for program end
+
+    logic [7:0] memory_bytes [0:memBytes-1];   // Store the hex file as individual 8-bit bytes before packing each group of four into an instruction word.
+    logic [31:0] word_to_write; // Our instruction to write to BRAM
+
+    always #5ns clk = ~clk; // 100MHz clock
+
     
-    // AXI4-Lite Read Signals
-    logic [19:0] araddr; // 19 because we have memory depth of 262,144
-    logic        arvalid; // address valid by CPU
-    logic        arready; // address ready ack by BRAM
-    logic [31:0] rdata; // The instruction being loaded
-    logic        rvalid; // instr valid  by BRAM
-    logic        rready; // Wait for master to ack
-    
-    control_unit myCUnit 
-    (.clk(clk),
-     .rst(rst),
-     .instruction(instruction),
-     .valid(valid),
-     .ready(ready),
-     .error(error));
-     
-     
-     
-     
-    // Instantiate the BRAM 
+    control_unit myCUnit (
+        .clk     (clk),
+        .rst     (cpu_rst),
+        .error   (),
+        .arready (arready),
+        .araddr  (araddr),
+        .arvalid (arvalid),
+        .rdata   (rdata),
+        .rvalid  (rvalid),
+        .rready  (rready)
+    );
+
     MY_AXI_BRAM my_bram (
-    .s_axi_aclk    (clk),
-    .s_axi_aresetn (!rst),// Negate because Active-low reset for BRAM
+        .s_axi_aclk    (clk),
+        .s_axi_aresetn (!bram_rst),
+        .s_axi_araddr  (araddr),
+        .s_axi_arprot  (3'b000),
+        .s_axi_arready (arready),
+        .s_axi_arvalid (arvalid),
+        .s_axi_rdata   (rdata),
+        .s_axi_rready  (rready),
+        .s_axi_rvalid  (rvalid),
+        .s_axi_awaddr  (awaddr),
+        .s_axi_awprot  (3'b000),
+        .s_axi_awready (awready),
+        .s_axi_awvalid (awvalid),
+        .s_axi_wdata   (wdata),
+        .s_axi_wready  (wready),
+        .s_axi_wstrb   (4'b1111),
+        .s_axi_wvalid  (wvalid),
+        .s_axi_bready  (bready),
+        .s_axi_bresp   (bresp),
+        .s_axi_bvalid  (bvalid)
+    );
+
+    // Write one word to BRAM and wait for the AXI write response.
+    task automatic write_word(
+        input logic [19:0] address,
+        input logic [31:0] data
+    );
+        bit address_done;
+        bit data_done;
+        begin
+            address_done = 1'b0;
+            data_done = 1'b0;
+
+            @(negedge clk);
+            awaddr = address;
+            wdata = data;
+            awvalid = 1'b1;
+            wvalid = 1'b1;
+            bready = 1'b0;
+
+            while (!(address_done && data_done)) begin
+                @(posedge clk);
+                if (awvalid && awready)
+                    address_done = 1'b1;
+                if (wvalid && wready)
+                    data_done = 1'b1;
+
+                @(negedge clk);
+                if (address_done)
+                    awvalid = 1'b0;
+                if (data_done)
+                    wvalid = 1'b0;
+            end
+
+            bready = 1'b1;
+            do begin
+                @(posedge clk);
+            end while (!(bvalid && bready));
+            @(negedge clk);
+            bready = 1'b0;
+        end
+    endtask
     
-    // Read Address Channel
-    .s_axi_araddr  (araddr), 
-    .s_axi_arprot  (3'b000), // set to 0 we don't need this for our purposes
-    .s_axi_arvalid (arvalid),
-    .s_axi_arready (arready),
-    
-    // Read Data Channel
-    .s_axi_rdata   (rdata),
-    .s_axi_rresp   (),// Leave unconnected No err handling needed rn for my local BRAM 
-    .s_axi_rvalid  (rvalid),
-    .s_axi_rready  (rready),
-    
-    // set all write channels to 0 because we are using for instruction memory purposes
-    .s_axi_awaddr  (20'b0),
-    .s_axi_awprot  (3'b0),
-    .s_axi_awvalid (1'b0),
-    .s_axi_awready (),
-    .s_axi_wdata   (32'b0),
-    .s_axi_wstrb   (4'b0),
-    .s_axi_wvalid  (1'b0),
-    .s_axi_wready  (),
-    .s_axi_bresp   (),
-    .s_axi_bvalid  (1'b0),
-    .s_axi_bready  (1'b1)
-);
-     
     
     
-   // 
-    assign instruction = rdata;
-    // Connect BRAM rvalid directly to control unit valid (since data is valid when BRAM says so)
-    assign valid = rvalid;
-     
     
-    always #5ns clk = ~clk;
     
+
     initial begin
-    clk = 0;
-    rst=1; instruction = 0;
-    #20; // set reset up for 20ns
-    rst = 0;
-    #10; // Now set it to off
-    
-    
-    
-    @(negedge clk);
-    valid = 1;
-    @(posedge clk); #1;
-    valid = 0;
-    // Okay so I am doing this because I learned it is a great way to manage data inputs.
-    // Let me explain. @negedge clk I do the instruction and valid assigning.
-    // So those values will populate on the negedge of the clock giving a half cycle of wait
-    // Then I use posedge because the register file only writes on the rising edge
-    // So with the posedge command I am waiting for the clock to go high
-    // so that the reg file latches d_in into rd_sel
-    // No data races here
-    
-    
-    #20; // Time spacing
-    
-    // Test for X0 with Addi (100) to x0 reg
-    @(negedge clk);
-    instruction = {12'd100,5'd0, 3'h0, 5'd0, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("Register 0 Value After ANDI = %0d", myCUnit.my_regs.registers[0]);
-    #10;
-    valid = 0;
-    #20; //Time spacing
-    
-    // Test for X0 with Ori (-1) to x0 reg
-    @(negedge clk);
-    instruction = {12'hff,5'd0, 3'h6, 5'd0, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("Register 0 Value After ORI = %0d", myCUnit.my_regs.registers[0]);
-    #10;
-    valid = 0;
-    #20; //Time spacing
-    
-  
-    
-    // LUI Tests (Load Upper Immediate)
-   
-    // Load 0xfa0af000 into t0 (reg 5)
-    @(negedge clk);
-    instruction = {20'hfa0af, 5'd5, 7'b0110111}; // LUI t0, 0xfa0af
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t0 Value After LUI = 0x%0h", myCUnit.my_regs.registers[5]);
-    valid = 0; #20;
+        cpu_rst = 1'b1;
+        bram_rst = 1'b1;
+        awvalid = 1'b0;
+        awaddr = '0;
+        wvalid = 1'b0;
+        wdata = '0;
+        bready = 1'b0;
 
-    // Load 0x15f51000 into t1 (reg 6)
-    @(negedge clk);
-    instruction = {20'h15f51, 5'd6, 7'b0110111}; // LUI t1, 0x15f51
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t1 Value After LUI = 0x%0h", myCUnit.my_regs.registers[6]);
-    valid = 0; #20;
+        repeat (4) @(negedge clk);
+        bram_rst = 1'b0;
+        repeat (2) @(negedge clk);
 
+        // Clear unused memory bytes, then load the little-endian hex file.
+        for (int i = 0; i < memBytes; i = i + 1)
+            memory_bytes[i] = 8'h00;
+        $readmemh("lab3_binary.txt", memory_bytes); // funct for processing the hex
 
-    
-    // I-Type ALU Operations
-    
+        $display("Loading program into BRAM..."); // Display for our loading phase
+        for (int i = 0; i < memBytes; i = i + 4) begin
+            word_to_write = {
+                memory_bytes[i+3], memory_bytes[i+2],
+                memory_bytes[i+1], memory_bytes[i]
+            };
+            write_word(i[19:0], word_to_write);
+        end
+        $display("BRAM loading complete."); // Ack that the loading is complete
 
-    // addi t2 (reg 7), t0 (reg 5), 0x123
-    @(negedge clk);
-    instruction = {12'h123, 5'd5, 3'h0, 5'd7, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After ADDI (t0 + 0x123) = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
+        repeat (2) @(negedge clk);
+        cpu_rst = 1'b0; // Reset the cpu
+        $display("Running program..."); //Now show program is running
 
-    // addi t2 (reg 7), t1 (reg 6), 0x800
-    @(negedge clk);
-    instruction = {12'h800, 5'd6, 3'h0, 5'd7, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After ADDI (t1 + 0x800) = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
+        // If we are on the ending PC         
+        wait ((myCUnit.PC == programEndPC) && (myCUnit.state == 2'd0));
+        @(negedge clk);
 
-    // xori t2 (reg 7), t0 (reg 5), -1 (0xfff)
-    @(negedge clk);
-    instruction = {12'hfff, 5'd5, 3'h4, 5'd7, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After XORI (t0 ^ -1) = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
+        $display(""); // SPacing
+        $display("Register contents:");
+        for (int i = 0; i < 32; i = i + 1) // All regs
+            $display("Register x%0d : 0x%08h", i, myCUnit.my_regs.registers[i]);
 
-    // andi t2 (reg 7), t1 (reg 6), -1 (0xfff)
-    @(negedge clk);
-    instruction = {12'hfff, 5'd6, 3'h7, 5'd7, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After ANDI (t1 & -1) = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-
-    // ori t2 (reg 7), t0 (reg 5), 0xaaa
-    @(negedge clk);
-    instruction = {12'haaa, 5'd5, 3'h6, 5'd7, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After ORI (t0 | 0xaaa) = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-
-
-  
-    //R-Type ALU Operations
-    
-
-    // Finish loading t0: addi t0, t0, 0xa0f
-    @(negedge clk);
-    instruction = {12'ha0f, 5'd5, 3'h0, 5'd5, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t0 Finished Loading (ADDI) = 0x%0h", myCUnit.my_regs.registers[5]);
-    valid = 0; #20;
-
-    // Finish loading t1: addi t1, t1, 0x5f1
-    @(negedge clk);
-    instruction = {12'h5f1, 5'd6, 3'h0, 5'd6, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t1 Finished Loading (ADDI) = 0x%0h", myCUnit.my_regs.registers[6]);
-    valid = 0; #20;
-
-    // add t2, t0, t1
-    @(negedge clk);
-    instruction = {7'h00, 5'd6, 5'd5, 3'h0, 5'd7, 7'b0110011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After ADD = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-
-    // sub t2, t0, t1
-    @(negedge clk);
-    instruction = {7'h20, 5'd6, 5'd5, 3'h0, 5'd7, 7'b0110011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After SUB = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-
-    // xor t2, t0, t1
-    @(negedge clk);
-    instruction = {7'h00, 5'd6, 5'd5, 3'h4, 5'd7, 7'b0110011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After XOR = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-
-    // or t2, t0, t1
-    @(negedge clk);
-    instruction = {7'h00, 5'd6, 5'd5, 3'h6, 5'd7, 7'b0110011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After OR = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-
-    // and t2, t0, t1
-    @(negedge clk);
-    instruction = {7'h00, 5'd6, 5'd5, 3'h7, 5'd7, 7'b0110011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After AND = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-
-    // Set t1 to 5: addi t1, x0, 5
-    @(negedge clk);
-    instruction = {12'h005, 5'd0, 3'h0, 5'd6, 7'b0010011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t1 Set to 5 (ADDI) = 0x%0h", myCUnit.my_regs.registers[6]);
-    valid = 0; #20;
-
-    // sll t2, t0, t1
-    @(negedge clk);
-    instruction = {7'h00, 5'd6, 5'd5, 3'h1, 5'd7, 7'b0110011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After SLL = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-
-    // srl t2, t0, t1
-    @(negedge clk);
-    instruction = {7'h00, 5'd6, 5'd5, 3'h5, 5'd7, 7'b0110011}; 
-    valid = 1;
-    @(posedge clk); #1;
-    $display("t2 Value After SRL = 0x%0h", myCUnit.my_regs.registers[7]);
-    valid = 0; #20;
-    
+        $finish;
     end
+
 endmodule
