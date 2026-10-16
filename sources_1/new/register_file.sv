@@ -46,14 +46,14 @@ module register_file #(parameter reg_size = 32, parameter num_reg = 16)(
                 registers[i] <= 0;
         end
     end else if (we) begin
-        if(rd_sel != 0) begin
+       
             registers[rd_sel[4:0]] <= d_in; // we are writing to rd 
-        end else begin
+        
             
         end
     
     end
     
-    end
+   
     
 endmodule
