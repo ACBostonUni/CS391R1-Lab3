@@ -46,6 +46,7 @@ module control_unit_tb;
         .rready  (rready)
     );
 
+    // Instantiate the BRAM, yes even the write channels
     MY_AXI_BRAM my_bram (
         .s_axi_aclk    (clk),
         .s_axi_aresetn (!bram_rst),
@@ -114,7 +115,7 @@ module control_unit_tb;
     
     
     
-
+    // Start of the test bench for reals
     initial begin
         cpu_rst = 1'b1;
         bram_rst = 1'b1;
